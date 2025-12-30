@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/spf13/viper"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -66,20 +67,24 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Read required environment variables
-	jfrogURL := os.Getenv("JFROG_URL")
+	// Configure Viper to read environment variables
+	viper.AutomaticEnv()
+	viper.SetEnvPrefix("") // No prefix, read variables as-is
+
+	// Read required configuration
+	jfrogURL := viper.GetString("JFROG_URL")
 	if jfrogURL == "" {
 		setupLog.Error(nil, "JFROG_URL environment variable is required")
 		os.Exit(1)
 	}
 
-	jfrogRegistry := os.Getenv("JFROG_REGISTRY")
+	jfrogRegistry := viper.GetString("JFROG_REGISTRY")
 	if jfrogRegistry == "" {
 		setupLog.Error(nil, "JFROG_REGISTRY environment variable is required")
 		os.Exit(1)
 	}
 
-	providerName := os.Getenv("PROVIDER_NAME")
+	providerName := viper.GetString("PROVIDER_NAME")
 	if providerName == "" {
 		setupLog.Error(nil, "PROVIDER_NAME environment variable is required")
 		os.Exit(1)
