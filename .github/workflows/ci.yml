@@ -10,6 +10,9 @@ on:
       - main
       - master
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test
@@ -21,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.20'
+          go-version-file: go.mod
           cache: true
 
       - name: Run tests
@@ -44,19 +47,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.20'
+          go-version-file: go.mod
           cache: true
 
-      - name: Run go fmt
-        run: |
-          if [ -n "$(gofmt -s -l .)" ]; then
-            echo "Go code is not formatted. Run 'go fmt ./...' to fix."
-            gofmt -s -d .
-            exit 1
-          fi
-
-      - name: Run go vet
-        run: go vet ./...
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
 
   build:
     name: Build
@@ -69,7 +66,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.20'
+          go-version-file: go.mod
           cache: true
 
       - name: Build

@@ -1,4 +1,7 @@
 # jfrog-token-exchanger
+
+[![CI](https://github.com/richardmcsong/jfrog-token-exchanger/actions/workflows/ci.yml/badge.svg)](https://github.com/richardmcsong/jfrog-token-exchanger/actions/workflows/ci.yml)
+
 // TODO(user): Add simple overview of use/purpose
 
 ## Description

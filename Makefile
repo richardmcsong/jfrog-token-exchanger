@@ -56,6 +56,14 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
+.PHONY: fmt-check
+fmt-check: ## Check if code is formatted.
+	@if [ -n "$$(gofmt -s -l .)" ]; then \
+		echo "Go code is not formatted. Run 'make fmt' to fix."; \
+		gofmt -s -d .; \
+		exit 1; \
+	fi
+
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...
