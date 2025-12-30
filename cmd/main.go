@@ -17,8 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"crypto/tls"
 	"flag"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -74,19 +77,25 @@ func main() {
 	// Read required configuration
 	jfrogURL := viper.GetString("JFROG_URL")
 	if jfrogURL == "" {
-		setupLog.Error(nil, "JFROG_URL environment variable is required")
+		setupLog.Error(fmt.Errorf("missing required configuration"), "JFROG_URL environment variable is required")
+		os.Exit(1)
+	}
+
+	// Validate that JFROG_URL is a valid URL
+	if _, err := url.Parse(jfrogURL); err != nil {
+		setupLog.Error(err, "JFROG_URL must be a valid URL", "jfrogURL", jfrogURL)
 		os.Exit(1)
 	}
 
 	jfrogRegistry := viper.GetString("JFROG_REGISTRY")
 	if jfrogRegistry == "" {
-		setupLog.Error(nil, "JFROG_REGISTRY environment variable is required")
+		setupLog.Error(fmt.Errorf("missing required configuration"), "JFROG_REGISTRY environment variable is required")
 		os.Exit(1)
 	}
 
 	providerName := viper.GetString("PROVIDER_NAME")
 	if providerName == "" {
-		setupLog.Error(nil, "PROVIDER_NAME environment variable is required")
+		setupLog.Error(fmt.Errorf("missing required configuration"), "PROVIDER_NAME environment variable is required")
 		os.Exit(1)
 	}
 
@@ -126,11 +135,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create JFrog client for token exchange
-	jfrogClient := &controller.DefaultJFrogClient{
-		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+	// Create JFrog client for token exchange with proper TLS configuration
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
+			MaxIdleConns:        10,
+			MaxIdleConnsPerHost: 5,
+			IdleConnTimeout:     90 * time.Second,
 		},
+	}
+
+	jfrogClient := &controller.DefaultJFrogClient{
+		HTTPClient:   httpClient,
 		JFrogURL:     jfrogURL,
 		ProviderName: providerName,
 	}
