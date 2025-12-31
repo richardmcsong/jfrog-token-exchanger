@@ -21,12 +21,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
+	"math"
 	"time"
 
+	"github.com/jfrog/jfrog-client-go/access"
+	"github.com/jfrog/jfrog-client-go/access/services"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,11 +41,11 @@ import (
 
 const (
 	// AnnotationJFrogToken is the annotation key to enable JFrog token exchange
-	AnnotationJFrogToken = "jfrog.io/token"
+	AnnotationJFrogToken = "jfrog.io/token" // #nosec G101 -- This is an annotation key, not a credential
 	// AnnotationValueEnabled is the value to enable token exchange
 	AnnotationValueEnabled = "enabled"
 	// AnnotationSecretExpiry is the annotation key for token expiry time
-	AnnotationSecretExpiry = "jfrog.io/token-expiry"
+	AnnotationSecretExpiry = "jfrog.io/token-expiry" // #nosec G101 -- This is an annotation key, not a credential
 	// SecretNameSuffix is the suffix for the generated secret name
 	SecretNameSuffix = "-jfrog-token"
 	// DefaultTokenExpirationSeconds is the default token expiration for ServiceAccount tokens
@@ -58,9 +57,9 @@ const (
 // JFrogTokenResponse represents the response from JFrog OIDC token exchange
 type JFrogTokenResponse struct {
 	AccessToken string `json:"access_token"`
-	ExpiresIn   int64  `json:"expires_in"`
 	Scope       string `json:"scope"`
 	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
 // DockerConfigJSON represents the Docker config.json format
@@ -104,50 +103,48 @@ func (r *DefaultTokenRequester) RequestToken(ctx context.Context, namespace, nam
 	return result.Status.Token, nil
 }
 
-// DefaultJFrogClient implements JFrogClient using HTTP
+// DefaultJFrogClient implements JFrogClient using the JFrog Go SDK
 type DefaultJFrogClient struct {
-	HTTPClient   *http.Client
-	JFrogURL     string
-	ProviderName string
+	AccessManager *access.AccessServicesManager
+	ProviderName  string
 }
 
 // ExchangeToken exchanges a Kubernetes ServiceAccount token for a JFrog access token
 func (c *DefaultJFrogClient) ExchangeToken(ctx context.Context, saToken string) (*JFrogTokenResponse, error) {
-	endpoint := fmt.Sprintf("%s/access/api/v1/oidc/token", strings.TrimSuffix(c.JFrogURL, "/"))
-
-	data := url.Values{}
-	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
-	data.Set("subject_token_type", "urn:ietf:params:oauth:token-type:id_token")
-	data.Set("subject_token", saToken)
-	data.Set("provider_name", c.ProviderName)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	params := services.CreateOidcTokenParams{
+		GrantType:        "urn:ietf:params:oauth:grant-type:token-exchange",
+		SubjectTokenType: "urn:ietf:params:oauth:token-type:id_token",
+		OidcTokenID:      saToken,
+		ProviderName:     c.ProviderName,
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.HTTPClient.Do(req)
+	response, err := c.AccessManager.ExchangeOidcToken(params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+	var expiresIn int64
+	if response.ExpiresIn != nil {
+		// Validate ExpiresIn fits within int64 max value
+		// uint is either 32-bit (max 2^32-1) or 64-bit (max 2^64-1)
+		// int64 max is 2^63-1, so we need to check for overflow on 64-bit systems
+		if *response.ExpiresIn > math.MaxInt64 {
+			return nil, fmt.Errorf("token expiration too large to convert safely: %d", *response.ExpiresIn)
+		}
+		expiresIn = int64(*response.ExpiresIn) // #nosec G115 -- validated above to be <= math.MaxInt64
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
+	// Validate we received a non-empty access token
+	if response.AccessToken == "" {
+		return nil, fmt.Errorf("received empty access token from JFrog")
 	}
 
-	var tokenResp JFrogTokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to parse token response: %w", err)
-	}
-
-	return &tokenResp, nil
+	return &JFrogTokenResponse{
+		AccessToken: response.AccessToken,
+		ExpiresIn:   expiresIn,
+		Scope:       response.Scope,
+		TokenType:   response.TokenType,
+	}, nil
 }
 
 // ServiceAccountReconciler reconciles a ServiceAccount object
@@ -231,7 +228,9 @@ func (r *ServiceAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		secret = &existingSecret
 		// Parse existing expiry time
 		if expiryStr, ok := existingSecret.Annotations[AnnotationSecretExpiry]; ok {
-			expiryTime, _ = time.Parse(time.RFC3339, expiryStr)
+			if parsedTime, err := time.Parse(time.RFC3339, expiryStr); err == nil {
+				expiryTime = parsedTime
+			}
 		}
 	}
 
@@ -253,10 +252,10 @@ func (r *ServiceAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	} else {
 		// Set owner reference so the secret is garbage collected when the SA is deleted
-		if err := controllerutil.SetControllerReference(&sa, secret, r.Scheme); err != nil {
+		if err = controllerutil.SetControllerReference(&sa, secret, r.Scheme); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to set owner reference: %w", err)
 		}
-		if err := r.Create(ctx, secret); err != nil {
+		if err = r.Create(ctx, secret); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to create secret: %w", err)
 		}
 	}

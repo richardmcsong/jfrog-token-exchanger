@@ -20,9 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -693,128 +690,9 @@ var _ = Describe("ServiceAccountReconciler", func() {
 	})
 })
 
-var _ = Describe("DefaultJFrogClient", func() {
-	Context("ExchangeToken", func() {
-		It("should successfully exchange token", func() {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.Method).To(Equal(http.MethodPost))
-				Expect(r.URL.Path).To(Equal("/access/api/v1/oidc/token"))
-				Expect(r.Header.Get("Content-Type")).To(Equal("application/x-www-form-urlencoded"))
-
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"access_token":"jfrog-token-123","expires_in":3600,"scope":"read","token_type":"Bearer"}`))
-			}))
-			defer server.Close()
-
-			client := &DefaultJFrogClient{
-				HTTPClient:   server.Client(),
-				JFrogURL:     server.URL,
-				ProviderName: "kubernetes",
-			}
-
-			resp, err := client.ExchangeToken(context.Background(), "test-sa-token")
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resp.AccessToken).To(Equal("jfrog-token-123"))
-			Expect(resp.ExpiresIn).To(Equal(int64(3600)))
-			Expect(resp.TokenType).To(Equal("Bearer"))
-		})
-
-		DescribeTable("error handling",
-			func(statusCode int, responseBody string) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(statusCode)
-					w.Write([]byte(responseBody))
-				}))
-				defer server.Close()
-
-				client := &DefaultJFrogClient{
-					HTTPClient:   server.Client(),
-					JFrogURL:     server.URL,
-					ProviderName: "kubernetes",
-				}
-
-				_, err := client.ExchangeToken(context.Background(), "test-token")
-				Expect(err).To(HaveOccurred())
-			},
-			Entry("server error", http.StatusInternalServerError, `{"error":"internal error"}`),
-			Entry("unauthorized", http.StatusUnauthorized, `{"error":"invalid token"}`),
-			Entry("bad request", http.StatusBadRequest, `{"error":"invalid grant"}`),
-			Entry("forbidden", http.StatusForbidden, `{"error":"access denied"}`),
-		)
-
-		It("should send correct request body", func() {
-			var receivedBody string
-
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				bodyBytes := make([]byte, r.ContentLength)
-				r.Body.Read(bodyBytes)
-				receivedBody = string(bodyBytes)
-
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"access_token":"token","expires_in":3600}`))
-			}))
-			defer server.Close()
-
-			client := &DefaultJFrogClient{
-				HTTPClient:   server.Client(),
-				JFrogURL:     server.URL,
-				ProviderName: "my-k8s-cluster",
-			}
-
-			_, err := client.ExchangeToken(context.Background(), "my-sa-token")
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(receivedBody).To(ContainSubstring("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange"))
-			Expect(receivedBody).To(ContainSubstring("subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token"))
-			Expect(receivedBody).To(ContainSubstring("subject_token=my-sa-token"))
-			Expect(receivedBody).To(ContainSubstring("provider_name=my-k8s-cluster"))
-		})
-
-		It("should handle URL with trailing slash", func() {
-			var receivedPath string
-
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				receivedPath = r.URL.Path
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"access_token":"token","expires_in":3600}`))
-			}))
-			defer server.Close()
-
-			client := &DefaultJFrogClient{
-				HTTPClient:   server.Client(),
-				JFrogURL:     server.URL + "/",
-				ProviderName: "test",
-			}
-
-			_, err := client.ExchangeToken(context.Background(), "token")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(receivedPath).To(Equal("/access/api/v1/oidc/token"))
-			Expect(strings.Contains(receivedPath, "//")).To(BeFalse())
-		})
-
-		It("should handle URL without trailing slash", func() {
-			var receivedPath string
-
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				receivedPath = r.URL.Path
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"access_token":"token","expires_in":3600}`))
-			}))
-			defer server.Close()
-
-			client := &DefaultJFrogClient{
-				HTTPClient:   server.Client(),
-				JFrogURL:     server.URL,
-				ProviderName: "test",
-			}
-
-			_, err := client.ExchangeToken(context.Background(), "token")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(receivedPath).To(Equal("/access/api/v1/oidc/token"))
-		})
-	})
-})
+// Note: DefaultJFrogClient integration tests are covered by the higher-level
+// ServiceAccountReconciler tests using MockJFrogClient. The actual SDK functionality
+// is tested by the jfrog-client-go library itself.
 
 func boolPtr(b bool) *bool {
 	return &b

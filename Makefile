@@ -56,6 +56,10 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
+.PHONY: lint
+lint: ## Run go lint against code.
+	golangci-lint-v2 run
+
 .PHONY: fmt-check
 fmt-check: ## Check if code is formatted.
 	@if [ -n "$$(gofmt -s -l .)" ]; then \
@@ -148,7 +152,7 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.0.1
-CONTROLLER_TOOLS_VERSION ?= v0.12.0
+CONTROLLER_TOOLS_VERSION ?= v0.20.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary. If wrong version is installed, it will be removed before downloading.
