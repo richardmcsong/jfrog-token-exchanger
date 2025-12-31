@@ -95,6 +95,36 @@ make test
 - `auth.OidcTokenResponseData` - Response from token exchange
 - `auth.CommonTokenParams` - Common token fields (AccessToken, ExpiresIn, Scope, TokenType)
 
+#### CI Issue Resolution: Go 1.24.6 Type Checker Bug
+
+**Problem:** CI tests were failing with `controller-gen` panic during object generation:
+```
+panic: runtime error: invalid memory address or nil pointer dereference
+go/types.(*StdSizes).Sizeof(0x0, ...)
+```
+
+**Root Cause:**
+- Go 1.24.6 has a type checker bug where `StdSizes` can be nil when analyzing structs containing external package types
+- `controller-gen` runs Go's type checker on all structs in `./...` including `DefaultJFrogClient`
+- When it encounters `access.AccessServicesManager` (external SDK type), the nil pointer bug is triggered
+- The panic occurs during the `make test` → `make generate` → `controller-gen object:...` phase
+
+**Why It Only Failed in CI:**
+- Local environment: Go 1.25.5 (has the bug fix) ✅
+- CI environment: Go 1.24.6 from `go.mod` (has the bug) ❌
+- Different Go versions = different type checker behavior
+
+**Solution:**
+Updated `go.mod` from `go 1.24.6` to `go 1.25`
+- Go 1.25 includes the type checker fix
+- No code changes required
+- Addresses root cause rather than working around it
+
+**Alternative Solutions Considered:**
+1. Add `// +kubebuilder:object:generate=false` markers (workaround)
+2. Move types to separate package excluded from controller-gen (complex)
+3. Update Go version (chosen - simplest and most correct)
+
 #### Migration Notes for Future Reference
 
 When working with the SDK:
@@ -102,3 +132,4 @@ When working with the SDK:
 2. Response type is `auth.OidcTokenResponseData` with embedded `CommonTokenParams`
 3. The SDK handles all HTTP-level details (TLS, retries, error handling)
 4. No need to manually construct URLs or handle URL encoding - SDK does this
+5. Requires Go 1.25+ due to type checker bug in earlier versions when embedding external SDK types
