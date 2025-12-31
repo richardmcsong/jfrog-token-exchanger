@@ -21,12 +21,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
+	"github.com/jfrog/jfrog-client-go/access"
+	"github.com/jfrog/jfrog-client-go/access/services"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -104,50 +102,37 @@ func (r *DefaultTokenRequester) RequestToken(ctx context.Context, namespace, nam
 	return result.Status.Token, nil
 }
 
-// DefaultJFrogClient implements JFrogClient using HTTP
+// DefaultJFrogClient implements JFrogClient using the JFrog Go SDK
 type DefaultJFrogClient struct {
-	HTTPClient   *http.Client
-	JFrogURL     string
-	ProviderName string
+	AccessManager access.AccessServicesManager
+	ProviderName  string
 }
 
 // ExchangeToken exchanges a Kubernetes ServiceAccount token for a JFrog access token
 func (c *DefaultJFrogClient) ExchangeToken(ctx context.Context, saToken string) (*JFrogTokenResponse, error) {
-	endpoint := fmt.Sprintf("%s/access/api/v1/oidc/token", strings.TrimSuffix(c.JFrogURL, "/"))
-
-	data := url.Values{}
-	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
-	data.Set("subject_token_type", "urn:ietf:params:oauth:token-type:id_token")
-	data.Set("subject_token", saToken)
-	data.Set("provider_name", c.ProviderName)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	params := services.CreateOidcTokenParams{
+		GrantType:        "urn:ietf:params:oauth:grant-type:token-exchange",
+		SubjectTokenType: "urn:ietf:params:oauth:token-type:id_token",
+		OidcTokenID:      saToken,
+		ProviderName:     c.ProviderName,
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.HTTPClient.Do(req)
+	response, err := c.AccessManager.ExchangeOidcToken(params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+	var expiresIn int64
+	if response.ExpiresIn != nil {
+		expiresIn = int64(*response.ExpiresIn)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tokenResp JFrogTokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to parse token response: %w", err)
-	}
-
-	return &tokenResp, nil
+	return &JFrogTokenResponse{
+		AccessToken: response.AccessToken,
+		ExpiresIn:   expiresIn,
+		Scope:       response.Scope,
+		TokenType:   response.TokenType,
+	}, nil
 }
 
 // ServiceAccountReconciler reconciles a ServiceAccount object

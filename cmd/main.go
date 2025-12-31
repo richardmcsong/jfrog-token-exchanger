@@ -17,14 +17,14 @@ limitations under the License.
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
-	"time"
 
+	"github.com/jfrog/jfrog-client-go/access"
+	accessAuth "github.com/jfrog/jfrog-client-go/access/auth"
+	clientConfig "github.com/jfrog/jfrog-client-go/config"
 	"github.com/spf13/viper"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -135,23 +135,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create JFrog client for token exchange with proper TLS configuration
-	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			},
-			MaxIdleConns:        10,
-			MaxIdleConnsPerHost: 5,
-			IdleConnTimeout:     90 * time.Second,
-		},
+	// Create JFrog Access Manager using the SDK
+	accessDetails := accessAuth.NewAccessDetails()
+	accessDetails.SetUrl(jfrogURL)
+
+	serviceConfig, err := clientConfig.NewConfigBuilder().
+		SetServiceDetails(accessDetails).
+		Build()
+	if err != nil {
+		setupLog.Error(err, "unable to create JFrog service config")
+		os.Exit(1)
+	}
+
+	accessManager, err := access.New(serviceConfig)
+	if err != nil {
+		setupLog.Error(err, "unable to create JFrog access manager")
+		os.Exit(1)
 	}
 
 	jfrogClient := &controller.DefaultJFrogClient{
-		HTTPClient:   httpClient,
-		JFrogURL:     jfrogURL,
-		ProviderName: providerName,
+		AccessManager: *accessManager,
+		ProviderName:  providerName,
 	}
 
 	if err = (&controller.ServiceAccountReconciler{
