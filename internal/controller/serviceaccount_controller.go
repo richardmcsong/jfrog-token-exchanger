@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jfrog/jfrog-client-go/access"
@@ -54,11 +55,13 @@ const (
 )
 
 // JFrogTokenResponse represents the response from JFrog OIDC token exchange
+//
+//nolint:govet // struct field order matches JSON response for readability
 type JFrogTokenResponse struct {
 	AccessToken string `json:"access_token"`
+	ExpiresIn   int64  `json:"expires_in"`
 	Scope       string `json:"scope"`
 	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
 }
 
 // DockerConfigJSON represents the Docker config.json format
@@ -104,7 +107,7 @@ func (r *DefaultTokenRequester) RequestToken(ctx context.Context, namespace, nam
 
 // DefaultJFrogClient implements JFrogClient using the JFrog Go SDK
 type DefaultJFrogClient struct {
-	AccessManager access.AccessServicesManager
+	AccessManager *access.AccessServicesManager
 	ProviderName  string
 }
 
@@ -124,7 +127,18 @@ func (c *DefaultJFrogClient) ExchangeToken(ctx context.Context, saToken string) 
 
 	var expiresIn int64
 	if response.ExpiresIn != nil {
-		expiresIn = int64(*response.ExpiresIn) // #nosec G115 -- ExpiresIn is a token lifetime in seconds, won't overflow int64
+		// Validate ExpiresIn fits within int64 max value
+		// uint is either 32-bit (max 2^32-1) or 64-bit (max 2^64-1)
+		// int64 max is 2^63-1, so we need to check for overflow on 64-bit systems
+		if *response.ExpiresIn > math.MaxInt64 {
+			return nil, fmt.Errorf("token expiration too large to convert safely: %d", *response.ExpiresIn)
+		}
+		expiresIn = int64(*response.ExpiresIn) // #nosec G115 -- validated above to be <= math.MaxInt64
+	}
+
+	// Validate we received a non-empty access token
+	if response.AccessToken == "" {
+		return nil, fmt.Errorf("received empty access token from JFrog")
 	}
 
 	return &JFrogTokenResponse{

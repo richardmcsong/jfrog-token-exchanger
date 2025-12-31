@@ -155,7 +155,7 @@ func main() {
 	}
 
 	jfrogClient := &controller.DefaultJFrogClient{
-		AccessManager: *accessManager,
+		AccessManager: accessManager,
 		ProviderName:  providerName,
 	}
 
