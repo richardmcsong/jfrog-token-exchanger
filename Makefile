@@ -136,11 +136,14 @@ docker-buildx-ci: docker-setup ## Build and push multi-arch docker image (for CI
 	$(CONTAINER_TOOL) buildx build \
 		--platform=$(PLATFORMS) \
 		$(foreach tag,$(DOCKER_TAGS),--tag $(REGISTRY)/$(IMAGE_NAME):$(tag)) \
-		--push=$(if $(DOCKER_PUSH),true,false) \
-		--cache-from=type=registry,ref=$(REGISTRY)/$(IMAGE_NAME):buildcache \
-		--cache-to=type=registry,ref=$(REGISTRY)/$(IMAGE_NAME):buildcache,mode=max \
+		$(if $(DOCKER_PUSH),--push,) \
+		$(if $(DOCKER_PUSH),--cache-from=type=registry$(comma)ref=$(REGISTRY)/$(IMAGE_NAME):buildcache,) \
+		$(if $(DOCKER_PUSH),--cache-to=type=registry$(comma)ref=$(REGISTRY)/$(IMAGE_NAME):buildcache$(comma)mode=max,) \
 		-f Dockerfile.cross .
 	rm -f Dockerfile.cross
+
+# Helper for comma in $(if ...)
+comma := ,
 
 .PHONY: docker-buildx-local
 docker-buildx-local: docker-setup ## Build multi-arch docker image locally (no push).

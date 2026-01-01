@@ -134,11 +134,14 @@ jobs:
         if: github.event_name != 'pull_request'
         run: make docker-login
         env:
+          REGISTRY: ${{ env.REGISTRY }}
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         run: make docker-buildx-ci
         env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
           DOCKER_TAGS: ${{ steps.tags.outputs.tags }}
           DOCKER_PUSH: ${{ github.event_name != 'pull_request' && '1' || '' }}
