@@ -15,9 +15,7 @@ spec:
       labels:
         app: test-app
     spec:
-      # serviceAccountName: default
-      imagePullSecrets:
-        - name: manual-test-user
+      serviceAccountName: default
       containers:
       - name: app
         image: richardmcsong.jfrog.io/ghcr/richardmcsong/jfrog-token-exchanger:latest

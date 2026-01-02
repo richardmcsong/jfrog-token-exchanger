@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -690,6 +691,156 @@ var _ = Describe("ServiceAccountReconciler", func() {
 			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: "test-sa", Namespace: "default"}, updatedSA)).To(Succeed())
 			Expect(updatedSA.ImagePullSecrets).To(ContainElement(corev1.LocalObjectReference{Name: "test-sa-jfrog-token"}))
 		})
+
+		It("should delete secret when annotation is removed", func() {
+			// Create SA without annotation and existing secret
+			sa := &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sa",
+					Namespace: "default",
+					// No jfrog.io/token annotation
+					UID: "test-uid-123",
+				},
+				ImagePullSecrets: []corev1.LocalObjectReference{
+					{Name: "test-sa-jfrog-token"},
+				},
+			}
+
+			existingSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sa-jfrog-token",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationSecretExpiry: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "v1",
+							Kind:       "ServiceAccount",
+							Name:       "test-sa",
+							UID:        "test-uid-123",
+							Controller: boolPtr(true),
+						},
+					},
+				},
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(`{"auths":{"test.jfrog.io":{"auth":"dGVzdA=="}}}`),
+				},
+			}
+
+			fakeClient = fakeclient.NewClientBuilder().
+				WithScheme(testScheme).
+				WithObjects(sa, existingSecret).
+				Build()
+
+			reconciler = &ServiceAccountReconciler{
+				Client:           fakeClient,
+				Scheme:           testScheme,
+				TokenRequester:   mockTokenReq,
+				JFrogClient:      mockJFrog,
+				JFrogRegistry:    "test.jfrog.io",
+				RenewalThreshold: 5 * time.Minute,
+			}
+
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "test-sa", Namespace: "default"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+
+			// Secret should be deleted
+			deletedSecret := &corev1.Secret{}
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: "test-sa-jfrog-token", Namespace: "default"}, deletedSecret)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+			// imagePullSecret should be removed from SA
+			updatedSA := &corev1.ServiceAccount{}
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: "test-sa", Namespace: "default"}, updatedSA)).To(Succeed())
+			Expect(updatedSA.ImagePullSecrets).NotTo(ContainElement(corev1.LocalObjectReference{Name: "test-sa-jfrog-token"}))
+		})
+
+		It("should not error when annotation is removed and no secret exists", func() {
+			sa := &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sa",
+					Namespace: "default",
+					// No jfrog.io/token annotation
+				},
+			}
+
+			fakeClient = fakeclient.NewClientBuilder().
+				WithScheme(testScheme).
+				WithObjects(sa).
+				Build()
+
+			reconciler = &ServiceAccountReconciler{
+				Client:      fakeClient,
+				Scheme:      testScheme,
+				JFrogClient: mockJFrog,
+			}
+
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "test-sa", Namespace: "default"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("removeImagePullSecret", func() {
+		var (
+			reconciler *ServiceAccountReconciler
+			fakeClient client.Client
+			ctx        context.Context
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+		})
+
+		DescribeTable("removing imagePullSecret",
+			func(existingSecrets []corev1.LocalObjectReference, secretName string, expectedSecretsCount int, shouldBeRemoved bool) {
+				sa := &corev1.ServiceAccount{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-sa",
+						Namespace: "default",
+					},
+					ImagePullSecrets: existingSecrets,
+				}
+
+				testScheme := newTestScheme()
+				fakeClient = fakeclient.NewClientBuilder().
+					WithScheme(testScheme).
+					WithObjects(sa).
+					Build()
+
+				reconciler = &ServiceAccountReconciler{
+					Client: fakeClient,
+					Scheme: testScheme,
+				}
+
+				err := reconciler.removeImagePullSecret(ctx, sa, secretName)
+				Expect(err).NotTo(HaveOccurred())
+
+				updatedSA := &corev1.ServiceAccount{}
+				err = fakeClient.Get(ctx, types.NamespacedName{Name: "test-sa", Namespace: "default"}, updatedSA)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(updatedSA.ImagePullSecrets).To(HaveLen(expectedSecretsCount))
+
+				if shouldBeRemoved {
+					for _, ref := range updatedSA.ImagePullSecrets {
+						Expect(ref.Name).NotTo(Equal(secretName))
+					}
+				}
+			},
+			Entry("no existing secrets", nil, "my-jfrog-token", 0, false),
+			Entry("empty secrets list", []corev1.LocalObjectReference{}, "my-jfrog-token", 0, false),
+			Entry("secret present - should be removed", []corev1.LocalObjectReference{{Name: "my-jfrog-token"}}, "my-jfrog-token", 0, true),
+			Entry("other secrets present - target removed", []corev1.LocalObjectReference{{Name: "other-secret"}, {Name: "my-jfrog-token"}}, "my-jfrog-token", 1, true),
+			Entry("only other secrets", []corev1.LocalObjectReference{{Name: "other"}}, "my-jfrog-token", 1, false),
+			Entry("multiple secrets with ours in middle", []corev1.LocalObjectReference{{Name: "first"}, {Name: "my-jfrog-token"}, {Name: "last"}}, "my-jfrog-token", 2, true),
+		)
 	})
 })
 
