@@ -175,15 +175,39 @@ func (r *ServiceAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	secretName := sa.Name + SecretNameSuffix
+
 	// Check if the annotation is set to enabled
 	if !r.shouldReconcile(&sa) {
-		logger.V(1).Info("ServiceAccount does not have jfrog.io/token=enabled annotation, skipping")
+		logger.V(1).Info("ServiceAccount does not have jfrog.io/token=enabled annotation")
+
+		// Clean up the secret if annotation was removed (owner reference only handles SA deletion, not annotation changes)
+		var existingSecret corev1.Secret
+		err := r.Get(ctx, client.ObjectKey{Namespace: sa.Namespace, Name: secretName}, &existingSecret)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("failed to check for existing secret: %w", err)
+			}
+			logger.V(1).Info("No secret found to clean up")
+		}
+
+		if err == nil {
+			// Secret exists but annotation is gone - delete it
+			logger.Info("Deleting JFrog token secret as annotation was removed")
+			if err := r.Delete(ctx, &existingSecret); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("failed to delete orphaned secret: %w", err)
+			}
+		}
+
+		// Remove from imagePullSecrets if present (regardless of whether secret was found)
+		if err := r.removeImagePullSecret(ctx, &sa, secretName); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to remove imagePullSecret: %w", err)
+		}
+
 		return ctrl.Result{}, nil
 	}
 
 	logger.Info("Reconciling ServiceAccount for JFrog token exchange")
-
-	secretName := sa.Name + SecretNameSuffix
 
 	// Check if secret already exists and if token needs renewal
 	var existingSecret corev1.Secret
@@ -362,6 +386,34 @@ func (r *ServiceAccountReconciler) ensureImagePullSecret(ctx context.Context, sa
 
 	// Add the imagePullSecret
 	sa.ImagePullSecrets = append(sa.ImagePullSecrets, corev1.LocalObjectReference{Name: secretName})
+	if err := r.Update(ctx, sa); err != nil {
+		return fmt.Errorf("failed to update service account: %w", err)
+	}
+
+	return nil
+}
+
+// removeImagePullSecret removes the secret from the ServiceAccount's imagePullSecrets if present
+func (r *ServiceAccountReconciler) removeImagePullSecret(ctx context.Context, sa *corev1.ServiceAccount, secretName string) error {
+	// Check if the secret is in the list
+	found := false
+	newSecrets := []corev1.LocalObjectReference{}
+	for _, ref := range sa.ImagePullSecrets {
+		if ref.Name == secretName {
+			found = true
+			// Skip this secret (effectively removing it)
+			continue
+		}
+		newSecrets = append(newSecrets, ref)
+	}
+
+	// If not found, nothing to do
+	if !found {
+		return nil
+	}
+
+	// Update the ServiceAccount with the secret removed
+	sa.ImagePullSecrets = newSecrets
 	if err := r.Update(ctx, sa); err != nil {
 		return fmt.Errorf("failed to update service account: %w", err)
 	}

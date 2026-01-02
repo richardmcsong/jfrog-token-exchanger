@@ -1,7 +1,6 @@
 resources:
   - ../default
 
-
 generatorOptions:
   disableNameSuffixHash: true
 
@@ -9,3 +8,7 @@ configMapGenerator:
 - name: jfrog-token-exchanger-config
   envs:
   - ./jfrog.env
+
+images:
+- name: ghcr.io/richardmcsong/jfrog-token-exchanger
+  newTag: pr-8

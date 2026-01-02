@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: default
+  labels:
+    app: test-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-app
+  template:
+    metadata:
+      labels:
+        app: test-app
+    spec:
+      serviceAccountName: default
+      containers:
+      - name: app
+        image: richardmcsong.jfrog.io/ghcr/richardmcsong/jfrog-token-exchanger:latest
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - while :; do sleep 2073600; done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 32Mi
