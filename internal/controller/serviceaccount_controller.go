@@ -320,10 +320,11 @@ func (r *ServiceAccountReconciler) requestServiceAccountToken(ctx context.Contex
 func (r *ServiceAccountReconciler) createDockerConfigSecret(sa *corev1.ServiceAccount, secretName, accessToken string, expiryTime time.Time) (*corev1.Secret, error) {
 	// Create Docker config JSON with JFrog format (token as password)
 	// For JFrog Artifactory, the access token is used directly as the password
-	auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(":%s", accessToken)))
+	auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(" :%s", accessToken)))
 	dockerConfig := DockerConfigJSON{
 		Auths: map[string]DockerConfigEntry{
 			r.JFrogRegistry: {
+
 				Auth: auth,
 			},
 		},
