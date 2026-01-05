@@ -62,13 +62,13 @@ func (r *Resolver) resolveAzureClusterName() (string, error) {
 		return "", fmt.Errorf("%s environment variable not found", KubernetesServiceHostEnv)
 	}
 
-	// Split by '-dns' to extract cluster name
-	parts := strings.SplitN(serviceHost, "-dns", 2)
-	if len(parts) < 2 {
+	// Split by '-dns' to extract cluster name (use last occurrence)
+	dnsIndex := strings.LastIndex(serviceHost, "-dns")
+	if dnsIndex == -1 {
 		return "", fmt.Errorf("invalid AKS service host format: expected '<cluster-name>-dns-...' but got '%s'", serviceHost)
 	}
 
-	clusterName := parts[0]
+	clusterName := serviceHost[:dnsIndex]
 	if clusterName == "" {
 		return "", fmt.Errorf("extracted cluster name is empty from service host: %s", serviceHost)
 	}

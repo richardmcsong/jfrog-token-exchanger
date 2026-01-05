@@ -112,9 +112,9 @@ var _ = Describe("Resolver", func() {
 				"-dns-abc.guid.privatelink.eastus.azmk8s.io",
 				"",
 				true),
-			Entry("multiple -dns occurrences (uses first)",
+			Entry("multiple -dns occurrences (uses last)",
 				"cluster-dns-dns-abc.guid.privatelink.eastus.azmk8s.io",
-				"cluster",
+				"cluster-dns",
 				false),
 		)
 
