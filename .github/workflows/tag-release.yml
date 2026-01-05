@@ -1,0 +1,125 @@
+name: Tag Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Update Version and Create Branches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Parse version from tag
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "major=${MAJOR}" >> $GITHUB_OUTPUT
+          echo "minor=${MINOR}" >> $GITHUB_OUTPUT
+          echo "patch=${PATCH}" >> $GITHUB_OUTPUT
+          echo "major_branch=v${MAJOR}" >> $GITHUB_OUTPUT
+          echo "minor_branch=v${MAJOR}.${MINOR}" >> $GITHUB_OUTPUT
+
+          echo "Parsed version: ${VERSION}"
+          echo "Major: ${MAJOR}, Minor: ${MINOR}, Patch: ${PATCH}"
+
+      - name: Update kustomization.yaml with version tag
+        run: |
+          KUSTOMIZATION_FILE="config/manager/kustomization.yaml"
+          VERSION="${{ steps.version.outputs.tag }}"
+
+          # Check if newTag already exists in the file
+          if grep -q "newTag:" "$KUSTOMIZATION_FILE"; then
+            # Update existing newTag
+            sed -i "s/newTag:.*/newTag: ${VERSION}/" "$KUSTOMIZATION_FILE"
+          else
+            # Add newTag under the images section
+            sed -i "/newName: ghcr.io\/richardmcsong\/jfrog-token-exchanger/a\\  newTag: ${VERSION}" "$KUSTOMIZATION_FILE"
+          fi
+
+          echo "Updated kustomization.yaml:"
+          cat "$KUSTOMIZATION_FILE"
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push kustomization changes
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+
+          # Check if there are changes to commit
+          if git diff --quiet config/manager/kustomization.yaml; then
+            echo "No changes to commit"
+          else
+            git add config/manager/kustomization.yaml
+            git commit -m "chore: update Docker image tag to ${VERSION}"
+
+            # Push to main branch
+            git push origin HEAD:main
+            echo "Pushed kustomization update to main"
+          fi
+
+      - name: Create or update major version branch
+        run: |
+          MAJOR_BRANCH="${{ steps.version.outputs.major_branch }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          MAJOR="${{ steps.version.outputs.major }}"
+
+          # Skip major branch for v0.x.x versions
+          if [[ "$MAJOR" == "0" ]]; then
+            echo "Skipping major branch creation for v0.x.x version"
+            exit 0
+          fi
+
+          echo "Creating/updating major version branch: ${MAJOR_BRANCH}"
+
+          # Force create/update the major branch to point to this tag
+          git branch -f "${MAJOR_BRANCH}" "${TAG}"
+          git push origin "${MAJOR_BRANCH}" --force
+
+          echo "Major branch ${MAJOR_BRANCH} now points to ${TAG}"
+
+      - name: Create or update minor version branch
+        run: |
+          MINOR_BRANCH="${{ steps.version.outputs.minor_branch }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          echo "Creating/updating minor version branch: ${MINOR_BRANCH}"
+
+          # Force create/update the minor branch to point to this tag
+          git branch -f "${MINOR_BRANCH}" "${TAG}"
+          git push origin "${MINOR_BRANCH}" --force
+
+          echo "Minor branch ${MINOR_BRANCH} now points to ${TAG}"
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Image**: \`ghcr.io/richardmcsong/jfrog-token-exchanger:${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Updated Branches" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ steps.version.outputs.minor_branch }}\` -> \`${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.version.outputs.major }}" != "0" ]]; then
+            echo "- \`${{ steps.version.outputs.major_branch }}\` -> \`${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
