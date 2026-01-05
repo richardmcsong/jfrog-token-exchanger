@@ -1,19 +1,6 @@
 name: Release
 
 on:
-  # Manual trigger - creates tag with updated kustomization.yaml
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 1.0.0 without the v prefix)'
-        required: true
-        type: string
-      create_github_release:
-        description: 'Create a GitHub release'
-        required: false
-        type: boolean
-        default: true
-
   # Trigger when release is created via GitHub UI
   # The tag will be updated to point to the commit with updated kustomization.yaml
   release:
@@ -36,19 +23,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine version
+      - name: Parse version from release tag
         id: version
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # Manual trigger - use input version
-            VERSION="${{ inputs.version }}"
-            # Remove 'v' prefix if provided
-            VERSION="${VERSION#v}"
-          else
-            # Release trigger - parse from release tag
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
-          fi
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
 
           # Validate version format
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -110,7 +89,7 @@ jobs:
           git push origin main
           echo "Committed version update to main"
 
-      - name: Create or update tag to include version commit
+      - name: Update tag to include version commit
         run: |
           TAG="${{ steps.version.outputs.tag }}"
 
@@ -157,22 +136,6 @@ jobs:
 
           echo "Major branch ${MAJOR_BRANCH} now points to ${TAG}"
 
-      - name: Create GitHub Release (workflow_dispatch only)
-        if: github.event_name == 'workflow_dispatch' && inputs.create_github_release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Generate release notes
-          gh release create "$TAG" \
-            --title "Release $TAG" \
-            --generate-notes \
-            --latest
-
-          echo "Created GitHub release for $TAG"
-
       - name: Summary
         run: |
           TAG="${{ steps.version.outputs.tag }}"
@@ -183,18 +146,12 @@ jobs:
 
           echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release**: ${{ github.event.release.name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag**: ${TAG}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **Docker Image**: \`ghcr.io/richardmcsong/jfrog-token-exchanger:${TAG}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Updated Branches" >> $GITHUB_STEP_SUMMARY
           echo "- \`${MINOR_BRANCH}\` -> \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
           if [[ "$MAJOR" != "0" ]]; then
             echo "- \`${MAJOR_BRANCH}\` -> \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Trigger" >> $GITHUB_STEP_SUMMARY
-          echo "- Event: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            echo "- Release: \`${{ github.event.release.name }}\`" >> $GITHUB_STEP_SUMMARY
           fi
