@@ -138,7 +138,12 @@ func main() {
 
 	// Create JFrog Access Manager using the SDK
 	accessDetails := accessAuth.NewAccessDetails()
-	accessDetails.SetUrl(jfrogURL)
+	accessURL, err := url.JoinPath(jfrogURL, "access")
+	if err != nil {
+		setupLog.Error(err, "failed to construct JFrog access URL", "jfrogURL", jfrogURL)
+		os.Exit(1)
+	}
+	accessDetails.SetUrl(accessURL)
 
 	serviceConfig, err := clientConfig.NewConfigBuilder().
 		SetServiceDetails(accessDetails).
