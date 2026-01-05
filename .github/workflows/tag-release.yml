@@ -80,8 +80,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Setup Kustomize
-        uses: imranismail/setup-kustomize@v2
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Kustomize
+        run: make kustomize
 
       - name: Update kustomization.yaml with version tag
         id: update_kustomization
@@ -89,7 +95,7 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
 
           cd config/manager
-          kustomize edit set image controller=ghcr.io/richardmcsong/jfrog-token-exchanger:${TAG}
+          ../../bin/kustomize edit set image controller=ghcr.io/richardmcsong/jfrog-token-exchanger:${TAG}
 
           echo "Updated kustomization.yaml:"
           cat kustomization.yaml
