@@ -1,29 +1,63 @@
-name: Tag Release
+name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  # Manual trigger - creates tag with updated kustomization.yaml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0 without the v prefix)'
+        required: true
+        type: string
+      create_github_release:
+        description: 'Create a GitHub release'
+        required: false
+        type: boolean
+        default: true
+
+  # Trigger when release is created via GitHub UI
+  # Note: Tag created via UI won't have updated kustomization.yaml,
+  # but main branch and version branches will be updated
+  release:
+    types: [published]
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Update Version and Create Branches
+    name: Release
     runs-on: ubuntu-latest
+    # Skip if triggered by github-actions bot to prevent loops
+    if: github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Parse version from tag
+      - name: Determine version
         id: version
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          VERSION=${TAG#v}
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Manual trigger - use input version
+            VERSION="${{ inputs.version }}"
+            # Remove 'v' prefix if provided
+            VERSION="${VERSION#v}"
+          else
+            # Release trigger - parse from release tag
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          fi
+
+          # Validate version format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Invalid version format '$VERSION'. Expected format: X.Y.Z"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
           MAJOR=$(echo $VERSION | cut -d. -f1)
           MINOR=$(echo $VERSION | cut -d. -f2)
           PATCH=$(echo $VERSION | cut -d. -f3)
@@ -36,46 +70,74 @@ jobs:
           echo "major_branch=v${MAJOR}" >> $GITHUB_OUTPUT
           echo "minor_branch=v${MAJOR}.${MINOR}" >> $GITHUB_OUTPUT
 
-          echo "Parsed version: ${VERSION}"
+          echo "Version: ${VERSION}"
+          echo "Tag: ${TAG}"
           echo "Major: ${MAJOR}, Minor: ${MINOR}, Patch: ${PATCH}"
-
-      - name: Update kustomization.yaml with version tag
-        run: |
-          KUSTOMIZATION_FILE="config/manager/kustomization.yaml"
-          VERSION="${{ steps.version.outputs.tag }}"
-
-          # Check if newTag already exists in the file
-          if grep -q "newTag:" "$KUSTOMIZATION_FILE"; then
-            # Update existing newTag
-            sed -i "s/newTag:.*/newTag: ${VERSION}/" "$KUSTOMIZATION_FILE"
-          else
-            # Add newTag under the images section
-            sed -i "/newName: ghcr.io\/richardmcsong\/jfrog-token-exchanger/a\\  newTag: ${VERSION}" "$KUSTOMIZATION_FILE"
-          fi
-
-          echo "Updated kustomization.yaml:"
-          cat "$KUSTOMIZATION_FILE"
 
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit and push kustomization changes
+      - name: Update kustomization.yaml with version tag
+        id: update_kustomization
         run: |
-          VERSION="${{ steps.version.outputs.tag }}"
+          KUSTOMIZATION_FILE="config/manager/kustomization.yaml"
+          TAG="${{ steps.version.outputs.tag }}"
 
-          # Check if there are changes to commit
-          if git diff --quiet config/manager/kustomization.yaml; then
-            echo "No changes to commit"
+          # Update newTag value
+          if grep -q "newTag:" "$KUSTOMIZATION_FILE"; then
+            sed -i "s/newTag:.*/newTag: ${TAG}/" "$KUSTOMIZATION_FILE"
           else
-            git add config/manager/kustomization.yaml
-            git commit -m "chore: update Docker image tag to ${VERSION}"
-
-            # Push to main branch
-            git push origin HEAD:main
-            echo "Pushed kustomization update to main"
+            sed -i "/newName: ghcr.io\/richardmcsong\/jfrog-token-exchanger/a\\  newTag: ${TAG}" "$KUSTOMIZATION_FILE"
           fi
+
+          echo "Updated kustomization.yaml:"
+          cat "$KUSTOMIZATION_FILE"
+
+          # Check if there are actual changes
+          if git diff --quiet config/manager/kustomization.yaml; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit version update
+        if: steps.update_kustomization.outputs.has_changes == 'true'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git add config/manager/kustomization.yaml
+          git commit -m "chore: update Docker image tag to ${TAG} [skip ci]"
+          git push origin main
+          echo "Committed version update to main"
+
+      - name: Create and push tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          # Check if tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Warning: Tag $TAG already exists. Updating it to point to current HEAD."
+            git tag -f "$TAG"
+            git push origin "$TAG" --force
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+          echo "Created/updated tag: $TAG"
+
+      - name: Create or update minor version branch
+        run: |
+          MINOR_BRANCH="${{ steps.version.outputs.minor_branch }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          echo "Creating/updating minor version branch: ${MINOR_BRANCH}"
+          git branch -f "${MINOR_BRANCH}" HEAD
+          git push origin "${MINOR_BRANCH}" --force
+
+          echo "Minor branch ${MINOR_BRANCH} now points to ${TAG}"
 
       - name: Create or update major version branch
         run: |
@@ -90,36 +152,49 @@ jobs:
           fi
 
           echo "Creating/updating major version branch: ${MAJOR_BRANCH}"
-
-          # Force create/update the major branch to point to this tag
-          git branch -f "${MAJOR_BRANCH}" "${TAG}"
+          git branch -f "${MAJOR_BRANCH}" HEAD
           git push origin "${MAJOR_BRANCH}" --force
 
           echo "Major branch ${MAJOR_BRANCH} now points to ${TAG}"
 
-      - name: Create or update minor version branch
+      - name: Create GitHub Release (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch' && inputs.create_github_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MINOR_BRANCH="${{ steps.version.outputs.minor_branch }}"
           TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
 
-          echo "Creating/updating minor version branch: ${MINOR_BRANCH}"
+          # Generate release notes
+          gh release create "$TAG" \
+            --title "Release $TAG" \
+            --generate-notes \
+            --latest
 
-          # Force create/update the minor branch to point to this tag
-          git branch -f "${MINOR_BRANCH}" "${TAG}"
-          git push origin "${MINOR_BRANCH}" --force
-
-          echo "Minor branch ${MINOR_BRANCH} now points to ${TAG}"
+          echo "Created GitHub release for $TAG"
 
       - name: Summary
         run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          MAJOR="${{ steps.version.outputs.major }}"
+          MINOR_BRANCH="${{ steps.version.outputs.minor_branch }}"
+          MAJOR_BRANCH="${{ steps.version.outputs.major_branch }}"
+
           echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag**: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker Image**: \`ghcr.io/richardmcsong/jfrog-token-exchanger:${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Image**: \`ghcr.io/richardmcsong/jfrog-token-exchanger:${TAG}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Updated Branches" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ steps.version.outputs.minor_branch }}\` -> \`${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ steps.version.outputs.major }}" != "0" ]]; then
-            echo "- \`${{ steps.version.outputs.major_branch }}\` -> \`${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${MINOR_BRANCH}\` -> \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "$MAJOR" != "0" ]]; then
+            echo "- \`${MAJOR_BRANCH}\` -> \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Trigger" >> $GITHUB_STEP_SUMMARY
+          echo "- Event: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "- Release: \`${{ github.event.release.name }}\`" >> $GITHUB_STEP_SUMMARY
           fi
