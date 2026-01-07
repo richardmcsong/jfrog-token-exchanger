@@ -24,6 +24,7 @@ jobs:
       issues: write        # Required for commenting on issues
       id-token: write      # Required for OAuth token exchange
       actions: read        # Required for Claude to read CI results on PRs
+      workflows: write     # Required for modifying workflow files in .github/workflows/
     steps:
       # Generate token from GitHub App (preferred) or fall back to PAT/GITHUB_TOKEN
       # To use GitHub App: set APP_ID and APP_PRIVATE_KEY secrets
