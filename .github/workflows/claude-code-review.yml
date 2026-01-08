@@ -54,8 +54,17 @@ jobs:
                - Actionable suggestions
                - Final verdict/summary
                - Remove: excessive explanations, minor observations, redundant context
-            3. Use `gh api --method PATCH /repos/${{ github.repository }}/issues/comments/{comment_id} -f body='<condensed_text>'` to update each comment
-            4. Ensure the condensed version is significantly shorter (aim for 50% or less of original length)
+            3. Target: condensed comments should be <500 words (aim for 50% or less of original length)
+            4. To safely edit comments, create a temporary file with the condensed content:
+               ```bash
+               echo "$CONDENSED_CONTENT" > /tmp/condensed_comment.txt
+               gh api --method PATCH "/repos/${{ github.repository }}/issues/comments/{comment_id}" --input /tmp/condensed_comment.txt -f body=@-
+               ```
+               This avoids shell injection issues with quotes in the content.
+            5. Error Handling: If editing fails (permissions, locked comments, API limits):
+               - Skip that comment and continue with others
+               - Note in your review that some previous comments couldn't be condensed
+               - Do NOT let edit failures block your new review
 
             This helps reduce comment volume in PR threads while preserving key information.
 
