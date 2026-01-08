@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/richardmcsong/jfrog-token-exchanger:latest
+IMG ?= ghcr.io/richardmsong/jfrog-token-exchanger:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.27.1
 
@@ -19,7 +19,7 @@ CONTAINER_TOOL ?= docker
 
 # Docker registry configuration
 REGISTRY ?= ghcr.io
-IMAGE_NAME ?= richardmcsong/jfrog-token-exchanger
+IMAGE_NAME ?= richardmsong/jfrog-token-exchanger
 
 # DOCKER_TAGS can be set to override default tags (space-separated for multiple tags)
 # Example: make docker-buildx-ci DOCKER_TAGS="latest v1.0.0 sha-abc1234"
