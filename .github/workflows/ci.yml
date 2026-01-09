@@ -30,4 +30,5 @@ jobs:
     with:
       go-version-file: 'go.mod'
       docker-build-target: 'docker-buildx-ci'
+      push-image: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
