@@ -1,4 +1,4 @@
-module github.com/richardmcsong/jfrog-token-exchanger
+module github.com/richardmsong/jfrog-token-exchanger
 
 go 1.25
 

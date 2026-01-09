@@ -39,8 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/richardmcsong/jfrog-token-exchanger/internal/clustername"
-	"github.com/richardmcsong/jfrog-token-exchanger/internal/controller"
+	"github.com/richardmsong/jfrog-token-exchanger/internal/clustername"
+	"github.com/richardmsong/jfrog-token-exchanger/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
 
