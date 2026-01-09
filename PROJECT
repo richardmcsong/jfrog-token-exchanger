@@ -6,7 +6,7 @@ domain: jfrog.io
 layout:
 - go.kubebuilder.io/v4
 projectName: jfrog-token-exchanger
-repo: github.com/richardmcsong/jfrog-token-exchanger
+repo: github.com/richardmsong/jfrog-token-exchanger
 resources:
 - controller: true
   group: core
