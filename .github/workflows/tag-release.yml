@@ -93,7 +93,7 @@ jobs:
         id: update_kustomization
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          DOCKER_IMAGE="ghcr.io/richardmcsong/jfrog-token-exchanger:${VERSION}"
+          DOCKER_IMAGE="ghcr.io/richardmsong/jfrog-token-exchanger:${VERSION}"
 
           cd config/manager
           ../../bin/kustomize edit set image controller=${DOCKER_IMAGE}
