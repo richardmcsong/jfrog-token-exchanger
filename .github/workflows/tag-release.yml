@@ -30,9 +30,4 @@ jobs:
       dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
       image-name: 'ghcr.io/richardmsong/jfrog-token-exchanger'
       kustomization-path: 'config/manager'
-      update-kustomization: true
-      create-major-branch: true
-      create-minor-branch: true
-    secrets:
-      CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
-      CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+    secrets: inherit

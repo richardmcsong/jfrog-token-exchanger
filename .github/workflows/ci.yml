@@ -30,10 +30,5 @@ jobs:
     with:
       go-version-file: 'go.mod'
       push-image: true
-      run-tests: true
-      run-lint: true
-      lint-version: 'v2.7.2'
       docker-build-target: 'docker-buildx-ci'
-    secrets:
-      CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
-      CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+    secrets: inherit

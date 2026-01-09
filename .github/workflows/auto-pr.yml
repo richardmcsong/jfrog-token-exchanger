@@ -24,6 +24,4 @@ jobs:
   auto-pr:
     name: Create Pull Request
     uses: richardmsong/shared-workflows/.github/workflows/auto-pr.yml@main
-    secrets:
-      CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
-      CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+    secrets: inherit

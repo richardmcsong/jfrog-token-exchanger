@@ -20,9 +20,4 @@ jobs:
     uses: richardmsong/shared-workflows/.github/workflows/claude.yml@main
     with:
       allowed-tools: 'Bash(go:*),Bash(make:*),Bash(git:*),Bash(npm:*),Bash(cargo:*),mcp__codesign__sign_file'
-      additional-permissions: |
-        actions: read
-    secrets:
-      CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
-      CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    secrets: inherit
