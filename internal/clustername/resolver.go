@@ -28,7 +28,7 @@ const (
 	// ResolutionModeAzure is the cluster name resolution mode for Azure Kubernetes Service
 	ResolutionModeAzure = "azure"
 	// ServiceAccountTokenPath is the default path to the Kubernetes service account token
-	ServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	ServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // G101: This is a file path, not a credential
 )
 
 // Resolver provides methods for resolving cluster names from the environment
@@ -123,7 +123,8 @@ func extractClusterNameFromToken(token string) (string, error) {
 
 	// Find the AKS audience and extract cluster name
 	for _, aud := range audiences {
-		if clusterName := extractClusterNameFromAudience(aud); clusterName != "" {
+		clusterName, err := extractClusterNameFromAudience(aud)
+		if err == nil {
 			return clusterName, nil
 		}
 	}
@@ -133,11 +134,17 @@ func extractClusterNameFromToken(token string) (string, error) {
 
 // extractClusterNameFromAudience extracts the cluster name from an AKS audience URL
 // Expected format: https://<cluster-name>-dns-<hash>.hcp.<region>.azmk8s.io
-// Returns empty string if format doesn't match
-func extractClusterNameFromAudience(audience string) string {
+// Returns error if format doesn't match
+func extractClusterNameFromAudience(audience string) (string, error) {
 	// Check if this looks like an AKS audience URL
-	if !strings.HasPrefix(audience, "https://") || !strings.Contains(audience, ".hcp.") || !strings.Contains(audience, ".azmk8s.io") {
-		return ""
+	if !strings.HasPrefix(audience, "https://") {
+		return "", fmt.Errorf("audience does not start with https://: %s", audience)
+	}
+	if !strings.Contains(audience, ".hcp.") {
+		return "", fmt.Errorf("audience does not contain .hcp.: %s", audience)
+	}
+	if !strings.Contains(audience, ".azmk8s.io") {
+		return "", fmt.Errorf("audience does not contain .azmk8s.io: %s", audience)
 	}
 
 	// Remove the https:// prefix
@@ -146,13 +153,13 @@ func extractClusterNameFromAudience(audience string) string {
 	// Extract cluster name (everything before -dns)
 	dnsIndex := strings.Index(host, "-dns-")
 	if dnsIndex == -1 {
-		return ""
+		return "", fmt.Errorf("audience does not contain -dns- segment: %s", audience)
 	}
 
 	clusterName := host[:dnsIndex]
 	if clusterName == "" {
-		return ""
+		return "", fmt.Errorf("cluster name is empty in audience: %s", audience)
 	}
 
-	return clusterName
+	return clusterName, nil
 }

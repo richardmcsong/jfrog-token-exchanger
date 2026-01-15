@@ -258,33 +258,39 @@ var _ = Describe("Resolver", func() {
 
 	Context("extractClusterNameFromAudience", func() {
 		It("should extract cluster name from valid AKS audience", func() {
-			name := extractClusterNameFromAudience("https://my-cluster-dns-hash.hcp.eastus.azmk8s.io")
+			name, err := extractClusterNameFromAudience("https://my-cluster-dns-hash.hcp.eastus.azmk8s.io")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(name).To(Equal("my-cluster"))
 		})
 
 		It("should handle cluster names with multiple hyphens", func() {
-			name := extractClusterNameFromAudience("https://prod-k8s-cluster-v2-dns-hash.hcp.westus.azmk8s.io")
+			name, err := extractClusterNameFromAudience("https://prod-k8s-cluster-v2-dns-hash.hcp.westus.azmk8s.io")
+			Expect(err).NotTo(HaveOccurred())
 			Expect(name).To(Equal("prod-k8s-cluster-v2"))
 		})
 
-		It("should return empty string for non-AKS audience", func() {
-			name := extractClusterNameFromAudience("https://kubernetes.default.svc")
-			Expect(name).To(Equal(""))
+		It("should return error for non-AKS audience", func() {
+			_, err := extractClusterNameFromAudience("https://kubernetes.default.svc")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("does not contain .hcp."))
 		})
 
-		It("should return empty string for audience without https", func() {
-			name := extractClusterNameFromAudience("http://my-cluster-dns-hash.hcp.eastus.azmk8s.io")
-			Expect(name).To(Equal(""))
+		It("should return error for audience without https", func() {
+			_, err := extractClusterNameFromAudience("http://my-cluster-dns-hash.hcp.eastus.azmk8s.io")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("does not start with https://"))
 		})
 
-		It("should return empty string for audience without .hcp.", func() {
-			name := extractClusterNameFromAudience("https://my-cluster-dns-hash.eastus.azmk8s.io")
-			Expect(name).To(Equal(""))
+		It("should return error for audience without .hcp.", func() {
+			_, err := extractClusterNameFromAudience("https://my-cluster-dns-hash.eastus.azmk8s.io")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("does not contain .hcp."))
 		})
 
-		It("should return empty string for audience without -dns-", func() {
-			name := extractClusterNameFromAudience("https://my-cluster.hcp.eastus.azmk8s.io")
-			Expect(name).To(Equal(""))
+		It("should return error for audience without -dns-", func() {
+			_, err := extractClusterNameFromAudience("https://my-cluster.hcp.eastus.azmk8s.io")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("does not contain -dns-"))
 		})
 	})
 
